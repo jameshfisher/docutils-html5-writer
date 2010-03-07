@@ -1,11 +1,10 @@
+#! -*- coding: utf-8 -*-
 # $Id: __init__.py 6153 2009-10-05 13:37:10Z milde $
 # Author: James H. Fisher <jameshfisher@gmail.com>
 # Copyright: This module has been placed in the public domain.
 
 """
-Simple HyperText Markup Language 5 document tree Writer.
-
-The output conforms to the HTML5 spec.
+Simple document tree Writer for HTML5.
 
 The output contains a minimum of formatting information.
 
@@ -14,6 +13,30 @@ for proper viewing with a modern graphical browser.
 """
 
 __docformat__ = 'reStructuredText'
+
+"""
+CSS for this module is based on the following principles:
+
+- don't override default browser representation of semantic elements (e.g. <cite>)
+- don't use non-semantic classes (e.g. "list-style: lower-alpha" should be directly in the HTML 'style' attribute)
+- Don't identify presentational aspects where CSS can; e.g. class="first" should instead use the :first-child pseudo-selector
+- minimal in space (crush it if embedding)
+
+"""
+
+helper_css = u"""
+/*body { font-family: Gentium Basic; width: 40em; margin: 0 auto 0 auto; }*/
+dt { font-weight: bold; }
+dd { margin-bottom: 1em; }
+header th { text-align: left; padding-right: 1em;}
+header th:after { content: ":"; }
+hr { height: 1px; width: 20%; margin-left: 40%; border: none; background-color: black; }
+hgroup *:first-child { margin-bottom: 0;}
+hgroup *:nth-child(2) { margin-top: 0; }
+table.option-list th { font-weight: normal; vertical-align: top; text-align: left; }
+table.option-list th span { margin: 0; padding: 0; }
+"""
+
 
 
 """
@@ -38,24 +61,9 @@ try:
 except ImportError:
     Image = None
 
-# Suggested lxml import logic:
-try:
-  from lxml import etree
-except ImportError:
-  try:
-    # Python 2.5
-    import xml.etree.cElementTree as etree
-  except ImportError:
-    try:
-      # Python 2.5
-      import xml.etree.ElementTree as etree
-    except ImportError:
-      try:
-        # normal cElementTree install
-        import cElementTree as etree
-      except ImportError:
-        # normal ElementTree install
-        import elementtree.ElementTree as etree
+from lxml import html as lxmlhtml
+from lxml import etree
+
 
 try:
   from dateutil.parser import parse as dateutil_date_string_parse
@@ -78,10 +86,7 @@ from docutils.transforms import writer_aux
 
 class Writer(writers.Writer):
 
-  supported = ('html', 'html5', 'html5css3')
-  """Formats this writer supports."""
-
-  default_stylesheet = 'html5css3.css'
+  supported = ('html', 'html5', 'html5css3')  # Formats this writer supports
 
   def __init__(self):
     writers.Writer.__init__(self)
@@ -99,6 +104,7 @@ class HTML5Translator(nodes.NodeVisitor):
   
   
   def astext(self):
+    compact(self.html)
     return self.doctype + "\n" + etree.tostring(self.html, pretty_print=True)
 
   def cloak_mailto(self, uri):
@@ -142,18 +148,16 @@ class HTML5Translator(nodes.NodeVisitor):
     #self.header = etree.SubElement(self.article, "header")   # Meta-information goes here
     self.el = [self.article] # The current element
     
-    httpequiv = etree.SubElement(self.head, "meta")
-    httpequiv.set("http-equiv", "Content-Type")
-    httpequiv.set("content", "text/html; charset=utf-8")  # % settings.output_encoding
-    generator = etree.SubElement(self.head, "meta")
-    generator.set("name", "generator")
-    generator.set("content", "Docutils %s: http://docutils.sourceforge.net/" % docutils.__version__)
+    self.add_meta("generator", "Docutils %s: http://docutils.sourceforge.net/" % docutils.__version__)
+    
+    etree.SubElement(self.head, "style", type="text/css").text = helper_css
   
   def depart_document(self, node):
     pass
   
   def visit(self, name, **attrs):
     self.set_cur_el( etree.SubElement(self.cur_el(), name, **attrs) )
+    return self.cur_el()
   def depart(self):
     self.set_cur_el( self.cur_el().getparent() )
   
@@ -176,6 +180,9 @@ class HTML5Translator(nodes.NodeVisitor):
           return None
         else:
           tmp = parent
+  
+  def add_meta(self, attr, val):
+    etree.SubElement(self.html.xpath("/html/head")[0], "meta", attrib={'name': attr, 'content': val})
   
   def visit_title(self, node):
     try:
@@ -220,7 +227,8 @@ class HTML5Translator(nodes.NodeVisitor):
   def visit_author(self, node):
     self.el.append(self.prep_docinfo("Author", "author"))
   def depart_author(self, node):
-    self.el.pop()
+    el = self.el.pop()
+    self.add_meta("author", el.text)
   
   def visit_date(self, node):
     self.el.append(self.prep_docinfo("Date", "date"))
@@ -232,7 +240,8 @@ class HTML5Translator(nodes.NodeVisitor):
     else:
       self.cur_el().set("datetime", iso_date)
   def depart_date(self, node):
-    self.el.pop()
+    time = self.el.pop()
+    self.add_meta("date", time.get("datetime", time.text))
   
   
   def visit_colspec(self, node):
@@ -269,30 +278,97 @@ class HTML5Translator(nodes.NodeVisitor):
   def depart_definition_list_item(self, node):
     pass
   
-    
-simple_elements = {
-  "paragraph": "p",
-  "abbreviation": "abbr",
-  "acronym": "acronym",
-  "emphasis": "em",
-  "strong": "strong",
-  "table": "table",
-  "tgroup": "tgroup",
-  "row": "tr",
-  "tbody": "tbody",
-  "figure": "figure",
-  "caption": "figcaption",
-  "transition": "hr",
-  "definition_list": "dl",
-  "term": "dt",
-  "definition": "dd"
+  def visit_block_quote(self, node):
+    self.visit("blockquote")
+    self.visit("section")
+  def depart_block_quote(self, node):
+    if not self.cur_el()[-1].tag == "cite":
+      self.depart()
+    self.depart()
+  
+  def visit_attribution(self, node):
+    self.depart() # The section
+    self.visit("cite")
+  def depart_attribution(self, node):
+    self.depart()
+  
+  def visit_enumerated_list(self, node):
+    el = self.visit("ol")
+    html_list_style = {
+      'arabic':       None, # Default. Don't bother specifying it; it just makes ugly HTML.
+      'loweralpha':  'lower-alpha',
+      'upperalpha':  'upper-alpha',
+      'lowerroman':  'lower-roman',
+      'upperroman':  'upper-roman',
+      }[node.attributes['enumtype']]
+    if html_list_style:
+      el.set("style", "list-style: %s;" % html_list_style)
+  def depart_enumerated_list(self, node):
+    self.depart()
+  
+  def visit_option_argument(self, node):
+    el = self.visit("span")
+    el.set("class", "option-delimiter")
+    el.text = node.attributes['delimiter']
+    self.depart()
+    el = self.visit("var")
+  def depart_option_argument(self, node):
+    self.depart()
+  
+  def visit_option_group(self, node):
+    self.visit("th")
+    self.visit("kbd")
+  def depart_option_group(self, node):
+    self.depart()
+    self.depart()
+  
+class Tag:
+  def __init__(self, html_tag_name, classes=None, attribute_map={}):
+    self.html_tag_name = html_tag_name
+    self.classes = classes
+    self.attribute_map = attribute_map
+
+simple_elements = {         # HTML equiv.   
+  "paragraph":        Tag(  "p"                                         ),
+  "abbreviation":     Tag(  "abbr",                                     ),
+  "acronym":          Tag(  "acronym",                                  ),
+  "emphasis":         Tag(  "em",                                       ),
+  "strong":           Tag(  "strong",                                   ),
+  "table":            Tag(  "table",                                    ),
+  "tgroup":           Tag(  "tgroup",                                   ),
+  "row":              Tag(  "tr",                                       ),
+  "tbody":            Tag(  "tbody",                                              ),                     
+  "image":            Tag(  "img",        attribute_map={"uri": "src", "alt": "alt"},         ),
+  "figure":           Tag(  "figure",                                   ),
+  "caption":          Tag(  "figcaption",                               ),
+  "transition":       Tag(  "hr",                                       ),
+  "definition_list":  Tag(  "dl",                                       ),
+  "term":             Tag(  "dt",                                       ),
+  "definition":       Tag(  "dd",                                       ),
+  "literal_block":    Tag(  "pre",                                      ),
+  "bullet_list":      Tag(  "ul",                                       ),
+  "list_item":        Tag(  "li",                                       ),
+  "option_list":      Tag(  "table",    "option-list"                   ),
+  "option_list_item": Tag(  "tr"),
+  "option":           Tag(  "span"),
+  "option_string":    Tag(  "span", "option"),
+  "description":      Tag("td"),
   }
+    
 HTML5Translator.simple_elements = simple_elements
 
 def depart_rst_name(self, node):
   self.depart()
 def visit_rst_name_simple(self, node):
-  self.visit(self.simple_elements[node.__class__.__name__]) # Something better than node.__class__.__name__
+  simple_element = self.simple_elements[node.__class__.__name__]
+  cur_el = self.visit(simple_element.html_tag_name)
+  if simple_element.classes:
+    cur_el.set("class", simple_element.classes)
+  for k in simple_element.attribute_map.keys():
+    attr = node.attributes.get(k, None)
+    if attr:
+      cur_el.set(simple_element.attribute_map[k], attr)
+  
 for rst_name in simple_elements.keys():
   setattr(HTML5Translator, "visit_" + rst_name, visit_rst_name_simple)
   setattr(HTML5Translator, "depart_" + rst_name, depart_rst_name)
@@ -305,3 +381,29 @@ def visit_rst_name_classy(self, node):
 for rst_name in classy_elements:
   setattr(HTML5Translator, "visit_" + rst_name, visit_rst_name_classy)
   setattr(HTML5Translator, "depart_" + rst_name, depart_rst_name)
+
+
+
+def compact(html_tree):
+  """
+  Given an HTML tree, compact it.  This involves:
+  
+  - finding all nodes with a single non-text child node
+  - checking the pair (parent, child) in following lists,
+    and it is in the list, replace the pair with the appropriate
+    element of the two:
+    
+    Replace with parent:
+    *, p
+    
+    Replace with child:
+    hgroup, h*
+  """
+  for p in html_tree.xpath("//p"):
+    parent = p.getparent()
+    if len(parent) == 1 and parent.text == None:
+      parent.text = p.text
+      for c in p:
+        parent.append(c)
+      parent.remove(p)
+      
