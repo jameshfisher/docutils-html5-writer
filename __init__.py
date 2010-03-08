@@ -26,15 +26,14 @@ CSS for this module is based on the following principles:
 
 helper_css = u"""
 /*body { font-family: Gentium Basic; width: 40em; margin: 0 auto 0 auto; }*/
-dt { font-weight: bold; }
-dd { margin-bottom: 1em; }
-header th { text-align: left; padding-right: 1em;}
-header th:after { content: ":"; }
-hr { height: 1px; width: 20%; margin-left: 40%; border: none; background-color: black; }
-hgroup *:first-child { margin-bottom: 0;}
-hgroup *:nth-child(2) { margin-top: 0; }
-table.option-list th { font-weight: normal; vertical-align: top; text-align: left; }
-table.option-list th span { margin: 0; padding: 0; }
+.docutils dt { font-weight: bold; }
+.docutils dd { margin-bottom: 1em; }
+.docutils header th { text-align: left; padding-right: 1em;}
+.docutils header th:after { content: ":"; }
+.docutils hgroup *:first-child { margin-bottom: 0;}
+.docutils hgroup *:nth-child(2) { margin-top: 0; }
+.docutils table.option-list th { font-weight: normal; vertical-align: top; text-align: left; }
+.docutils table.option-list th span { margin: 0; padding: 0; }
 """
 
 
@@ -97,6 +96,15 @@ class Writer(writers.Writer):
     self.document.walkabout(visitor)
     self.output = visitor.astext()
 
+def add_text(node, text):
+  if len(node):
+    if node[-1].tail == None:
+      node[-1].tail = ""
+    node[-1].tail += text
+  else:
+    if node.text == None:
+      node.text = ""
+    node.text += text
 
 class HTML5Translator(nodes.NodeVisitor):
 
@@ -129,13 +137,8 @@ class HTML5Translator(nodes.NodeVisitor):
     self.el[-1] = val
   
   def visit_Text(self, node):
-    text = node.astext()
-    
-    e = self.cur_el()
-    if len(e) == 0:
-      e.text = text
-    else:
-      e[-1].tail = node.astext()
+    add_text(self.cur_el(), node.astext())
+  
   def depart_Text(self, node):
     pass
   
@@ -144,6 +147,7 @@ class HTML5Translator(nodes.NodeVisitor):
     self.head = etree.SubElement(self.html, "head")
     self.body = etree.SubElement(self.html, "body")       # The body element everything is to be added to
     self.article = etree.SubElement(self.body, "article")
+    self.article.set("class", "docutils") # Namespacing everything for the CSS
     self.section = self.article
     #self.header = etree.SubElement(self.article, "header")   # Meta-information goes here
     self.el = [self.article] # The current element
@@ -161,6 +165,9 @@ class HTML5Translator(nodes.NodeVisitor):
   def depart(self):
     self.set_cur_el( self.cur_el().getparent() )
   
+  def add(self, name, **attrs):
+    return etree.SubElement(self.cur_el(), name, **attrs)
+    
   def local_header(self):
     # Get the appropriate header for attaching titles or docinfo
     tmp = self.cur_el()
@@ -259,11 +266,18 @@ class HTML5Translator(nodes.NodeVisitor):
   def visit_entry(self, node):
     try:
       if self.in_thead:
-        self.visit("th")
+        el = self.visit("th")
       else:
-        self.visit("td")
+        el = self.visit("td")
     except AttributeError:
-      self.visit("td")
+      el = self.visit("td")
+    rowspan = node.attributes.get('morerows', 0) + 1
+    colspan = node.attributes.get('morecols', 0) + 1
+    if rowspan > 1:
+      el.set("rowspan", str(rowspan))
+    if colspan > 1:
+      el.set("colspan", str(colspan))
+      
   def depart_entry(self, node):
     self.depart()
   
@@ -321,6 +335,21 @@ class HTML5Translator(nodes.NodeVisitor):
   def depart_option_group(self, node):
     self.depart()
     self.depart()
+  
+  def visit_line_block(self, node):
+    try:
+      self.line_block_indent
+    except AttributeError:
+      self.line_block_indent = -1
+    self.line_block_indent += 1
+  def depart_line_block(self, node):
+    self.line_block_indent -= 1
+  
+  def visit_line(self, node):
+    el = self.cur_el()
+    add_text(el, u" " * (self.line_block_indent * 4))
+  def depart_line(self, node):
+    self.add("br")
   
 class Tag:
   def __init__(self, html_tag_name, classes=None, attribute_map={}):
