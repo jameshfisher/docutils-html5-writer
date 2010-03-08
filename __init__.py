@@ -25,7 +25,7 @@ CSS for this module is based on the following principles:
 """
 
 helper_css = u"""
-/*body { font-family: Gentium Basic; width: 40em; margin: 0 auto 0 auto; }*/
+body { font-family: Gentium Basic; width: 40em; margin: 0 auto 0 auto; }
 .docutils dt { font-weight: bold; }
 .docutils dd { margin-bottom: 1em; }
 .docutils header th { text-align: left; padding-right: 1em;}
@@ -34,6 +34,10 @@ helper_css = u"""
 .docutils hgroup *:nth-child(2) { margin-top: 0; }
 .docutils table.option-list th { font-weight: normal; vertical-align: top; text-align: left; }
 .docutils table.option-list th span { margin: 0; padding: 0; }
+.docutils a.ref { vertical-align: super; }
+.docutils div.footnote { display: table; }
+.docutils div.footnote * { display: table-cell; }
+.docutils div.footnote a { min-width: 3em; }
 """
 
 
@@ -292,19 +296,6 @@ class HTML5Translator(nodes.NodeVisitor):
   def depart_definition_list_item(self, node):
     pass
   
-  def visit_block_quote(self, node):
-    self.visit("blockquote")
-    self.visit("section")
-  def depart_block_quote(self, node):
-    if not self.cur_el()[-1].tag == "cite":
-      self.depart()
-    self.depart()
-  
-  def visit_attribution(self, node):
-    self.depart() # The section
-    self.visit("cite")
-  def depart_attribution(self, node):
-    self.depart()
   
   def visit_enumerated_list(self, node):
     el = self.visit("ol")
@@ -351,6 +342,22 @@ class HTML5Translator(nodes.NodeVisitor):
   def depart_line(self, node):
     self.add("br")
   
+  def visit_footnote_reference(self, node):
+    self.visit("a", href="#"+node.attributes['refid'], id=node.attributes['ids'][0], **{"class":"ref"})
+  def depart_footnote_reference(self, node):
+    self.depart()
+  
+  def visit_footnote(self, node):
+    self.visit("div", **{"class": "footnote"})
+  def depart_footnote(self, node):
+    self.depart()
+  
+  def visit_label(self, node):
+    self.visit("a", id=node.parent.attributes['ids'][0], href="#"+node.parent.attributes['backrefs'][0])
+  def depart_label(self, node):
+    self.depart()
+  
+  
 class Tag:
   def __init__(self, html_tag_name, classes=None, attribute_map={}):
     self.html_tag_name = html_tag_name
@@ -382,6 +389,8 @@ simple_elements = {         # HTML equiv.
   "option":           Tag(  "span"),
   "option_string":    Tag(  "span", "option"),
   "description":      Tag("td"),
+  "block_quote":      Tag("blockquote"),
+  "attribution":      Tag("cite"),
   }
     
 HTML5Translator.simple_elements = simple_elements
